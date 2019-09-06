@@ -2,7 +2,6 @@ package ssh
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -49,7 +48,6 @@ func SetTerminalEcho(flag bool) {
 func PrintMOTD(w io.Writer) {
 	out, err := exec.Command("cat", "/run/motd.dynamic").Output()
 	if err == nil {
-		fmt.Println(string(out))
 		w.Write(out)
 	}
 }

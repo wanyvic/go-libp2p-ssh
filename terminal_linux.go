@@ -2,7 +2,6 @@ package ssh
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -37,7 +36,7 @@ func getTerminalSize() (int, int, error) {
 func SetTerminalEcho(flag bool) {
 	if flag {
 		// disable input buffering
-		// exec.Command("stty", "-F", "/dev/tty", "cbreak", "min", "1").Run()
+		exec.Command("stty", "-F", "/dev/tty", "cbreak", "min", "1").Run()
 		// do not display entered characters on the screen
 		exec.Command("stty", "-F", "/dev/tty", "-echo").Run()
 	} else {
@@ -49,7 +48,6 @@ func SetTerminalEcho(flag bool) {
 func PrintMOTD(w io.Writer) {
 	out, err := exec.Command("cat", "/run/motd.dynamic").Output()
 	if err == nil {
-		fmt.Println(string(out))
 		w.Write(out)
 	}
 }

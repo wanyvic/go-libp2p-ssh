@@ -3,6 +3,8 @@ package ssh
 import (
 	"context"
 	"io"
+	"os"
+	"os/signal"
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/host"
@@ -45,6 +47,13 @@ func (sc *SSHClient) Connect(ctx context.Context, p peer.ID) error {
 	session.Stderr = sc.Stderr
 	session.Stdin = sc.Stdin
 
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
+	go func() {
+		for _ = range signalChan {
+			os.Stdin.Write([]byte{3, '\n'})
+		}
+	}()
 	// Set up terminal width, height
 	width, height, err := getTerminalSize()
 	if err != nil {

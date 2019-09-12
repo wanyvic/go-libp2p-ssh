@@ -37,7 +37,7 @@ func getTerminalSize() (int, int, error) {
 		return int(width), int(height), nil
 	}
 }
-func SetTerminalEcho(flag bool) {
+func setTerminalEcho(flag bool) {
 	h := syscall.Handle(os.Stdin.Fd())
 	if flag {
 		if err := SetInputConsoleMode(h, 0); err != nil {

@@ -2,9 +2,11 @@ package ssh
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -26,80 +28,96 @@ type SSHService struct {
 	ServerConfig ssh.ServerConfig
 }
 
+func DefaultServerConfig() (config ssh.ServerConfig, err error) {
+	var home string
+	if home = os.Getenv("HOME"); home == "" {
+		return config, errors.New("user not found")
+	}
+	config = ssh.ServerConfig{
+		//Define a function to run when a client attempts a password login
+		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+			if err := CheckPasswd(c.User(), pass); err != nil {
+				// Should use constant-time compare (or better, salt+hash) in a production setting.
+				return nil, errors.New("Mismatch password")
+			}
+			return nil, nil
+		},
+		PublicKeyCallback: func(c ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
+			authorizedKeysBytes, err := ioutil.ReadFile(fmt.Sprintf("/home/%s/.ssh/authorized_keys", c.User()))
+			if err != nil {
+				log.Fatalf("Failed to load authorized_keys, err: %v", err)
+				return nil, errors.New("Failed to load authorized_keys")
+			}
+			authorizedKeysMap := map[string]bool{}
+			for len(authorizedKeysBytes) > 0 {
+				pubKey, _, _, rest, err := ssh.ParseAuthorizedKey(authorizedKeysBytes)
+				if err != nil {
+					log.Fatal(err)
+				}
+				authorizedKeysMap[string(pubKey.Marshal())] = true
+				authorizedKeysBytes = rest
+			}
+			if authorizedKeysMap[string(pubKey.Marshal())] {
+				return &ssh.Permissions{
+					// Record the public key used for authentication.
+					Extensions: map[string]string{
+						"pubkey-fp": ssh.FingerprintSHA256(pubKey),
+					},
+				}, nil
+			}
+			return nil, fmt.Errorf("unknown public key for %q", c.User())
+		},
+		// You may also explicitly allow anonymous client authentication, though anon bash
+		// sessions may not be a wise idea
+		// NoClientAuth: true,
+	}
+	config, err = AddHostKey(&config, home+"/.ssh/id_rsa")
+	if err != nil {
+		return config, err
+	}
+	return config, nil
+}
 func NewSSHService(h host.Host, config ssh.ServerConfig) *SSHService {
 	ss := &SSHService{h, config}
 	h.SetStreamHandler(ID, ss.SSHandler)
 	return ss
 }
 
-func (ss *SSHService) SSHandler(s network.Stream) {
-	sshConn, chans, reqs, err := ssh.NewServerConn(s, &ss.ServerConfig)
-	if err != nil {
-		log.Error("Failed to handshake ", err)
-	}
-	log.Debug("New SSH connection from ", sshConn.RemoteMultiaddr(), sshConn.ClientVersion())
-	// Discard all global out-of-band Requests
-	go ssh.DiscardRequests(reqs)
-	// Accept all channels
-	handleChannels(chans)
-	fmt.Println("exit")
-	// for newChannel := range chans {
-	// 	// Channels have a type, depending on the application level
-	// 	// protocol intended. In the case of a shell, the type is
-	// 	// "session" and ServerShell may be used to present a simple
-	// 	// terminal interface.
-	// 	if newChannel.ChannelType() != "session" {
-	// 		newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
-	// 		continue
-	// 	}
-	// 	channel, requests, err := newChannel.Accept()
-	// 	if err != nil {
-	// 		log.Fatalf("Could not accept channel: %v", err)
-	// 	}
-	// 	// Sessions have out-of-band requests such as "shell",
-	// 	// "pty-req" and "env".  Here we handle only the
-	// 	// "shell" request.
-	// 	go func(in <-chan *ssh.Request) {
-	// 		for req := range in {
-	// 			req.Reply(req.Type == "shell", nil)
-	// 		}
-	// 	}(requests)
-	// 	term := terminal.NewTerminal(channel, "> ")
-	// 	go func() {
-	// 		defer channel.Close()
-	// 		for {
-	// 			line, err := term.ReadLine()
-	// 			if err != nil {
-	// 				break
-	// 			}
-	// 			fmt.Println(line)
-	// 		}
-	// 	}()
-	// }
-}
-func AddHostKey(config *ssh.ServerConfig, keyPath string) (*ssh.ServerConfig, error) {
+func AddHostKey(config *ssh.ServerConfig, keyPath string) (ssh.ServerConfig, error) {
 	// You can generate a keypair with 'ssh-keygen -t rsa'
 	privateBytes, err := ioutil.ReadFile(keyPath)
 	if err != nil {
 		log.Fatal("Failed to load private key ", err)
-		return config, err
+		return *config, err
 	}
 	private, err := ssh.ParsePrivateKey(privateBytes)
 	if err != nil {
 		log.Fatal("Failed to parse private key")
-		return config, err
+		return *config, err
 	}
 	config.AddHostKey(private)
-	return config, nil
+	return *config, nil
 }
-func handleChannels(chans <-chan ssh.NewChannel) {
+func (ss *SSHService) SSHandler(s network.Stream) {
+	sshConn, chans, reqs, err := ssh.NewServerConn(s, &ss.ServerConfig)
+	if err != nil {
+		log.Error("Failed to handshake ", err)
+		return
+	}
+	log.Info("New SSH connection from ", sshConn.RemoteMultiaddr(), sshConn.ClientVersion(), sshConn.User())
+	// Discard all global out-of-band Requests
+	go ssh.DiscardRequests(reqs)
+	// Accept all channels
+	handleChannels(chans, sshConn.User())
+}
+func handleChannels(chans <-chan ssh.NewChannel, user string) {
 	// Service the incoming Channel channel in go routine
 	for newChannel := range chans {
-		go handleChannel(newChannel)
+		go handleChannel(newChannel, user)
 	}
 }
 
-func handleChannel(newChannel ssh.NewChannel) {
+func handleChannel(newChannel ssh.NewChannel, user string) {
 	// Since we're handling a shell, we expect a
 	// channel type of "session". The also describes
 	// "x11", "direct-tcpip" and "forwarded-tcpip"
@@ -113,28 +131,27 @@ func handleChannel(newChannel ssh.NewChannel) {
 	// request for another logical connection
 	connection, requests, err := newChannel.Accept()
 	if err != nil {
-		fmt.Printf("Could not accept channel (%s)", err)
+		log.Errorf("Could not accept channel (%s)", err)
 		return
 	}
-
+	var bash *exec.Cmd
 	// Fire up bash for this session
-	bash := exec.Command("bash")
+	bash = exec.Command("login", "-f", user)
 
 	// Prepare teardown function
 	close := func() {
 		connection.Close()
 		_, err := bash.Process.Wait()
 		if err != nil {
-			fmt.Printf("Failed to exit bash (%s)", err)
+			log.Errorf("Failed to exit bash (%s)", err)
 		}
-		fmt.Printf("Session closed")
 	}
 
 	// Allocate a terminal for this channel
-	fmt.Println("Creating pty...")
+	log.Info("Creating pty...")
 	bashf, err := pty.Start(bash)
 	if err != nil {
-		fmt.Printf("Could not start pty (%s)", err)
+		log.Errorf("Could not start pty (%s)", err)
 		close()
 		return
 	}
@@ -160,7 +177,6 @@ func handleChannel(newChannel ssh.NewChannel) {
 				if len(req.Payload) == 0 {
 					req.Reply(true, nil)
 				}
-				PrintMOTD(connection)
 			case "pty-req":
 				termLen := req.Payload[3]
 				w, h := parseDims(req.Payload[termLen+4:])

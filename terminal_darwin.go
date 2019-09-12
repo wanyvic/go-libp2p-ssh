@@ -33,7 +33,7 @@ func getTerminalSize() (int, int, error) {
 	}
 	return termWidth, termHeight, nil
 }
-func SetTerminalEcho(flag bool) {
+func setTerminalEcho(flag bool) {
 	if flag {
 		// disable input buffering
 		// exec.Command("stty", "-f", "/dev/tty", "cbreak", "min", "1").Run()

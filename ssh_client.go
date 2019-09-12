@@ -21,8 +21,8 @@ type SSHClient struct {
 }
 
 func NewSSHClient(h host.Host, config ssh.ClientConfig) *SSHClient {
-	ss := &SSHClient{h, config, nil, nil, nil}
-	return ss
+	sc := &SSHClient{h, config, nil, nil, nil}
+	return sc
 }
 func (sc *SSHClient) Connect(ctx context.Context, p peer.ID) error {
 	stream, err := sc.Host.NewStream(ctx, p, ID)
@@ -39,19 +39,30 @@ func (sc *SSHClient) Connect(ctx context.Context, p peer.ID) error {
 	// create session
 	session, err := client.NewSession()
 	if err != nil {
-		return err
 	}
 	defer session.Close()
 	// excute command
 	session.Stdout = sc.Stdout
 	session.Stderr = sc.Stderr
-	session.Stdin = sc.Stdin
 
+	w, err := session.StdinPipe()
+	if err != nil {
+		return err
+	}
+	go io.Copy(w, sc.Stdin)
+
+	// Notify os.Interrupt
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
 	go func() {
-		for _ = range signalChan {
-			os.Stdin.Write([]byte{3, '\n'})
+		for {
+			select {
+			case <-ctx.Done():
+				signal.Stop(signalChan)
+				return
+			case <-signalChan:
+				w.Write([]byte{3})
+			}
 		}
 	}()
 	// Set up terminal width, height
@@ -72,18 +83,20 @@ func (sc *SSHClient) Connect(ctx context.Context, p peer.ID) error {
 		return err
 
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	go WindowChange(ctx, session)
-	defer cancel()
-	SetTerminalEcho(true)
-	defer SetTerminalEcho(false)
+	// change window size
+	go windowChange(ctx, session)
+
+	// no buffering
+	setTerminalEcho(true)
+	defer setTerminalEcho(false)
+
 	if err = session.Shell(); err != nil {
 		return err
 	}
 	session.Wait()
 	return nil
 }
-func WindowChange(ctx context.Context, session *ssh.Session) {
+func windowChange(ctx context.Context, session *ssh.Session) {
 	width, height, err := getTerminalSize()
 	if err != nil {
 		return

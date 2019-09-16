@@ -82,14 +82,12 @@ func connect(pid string, username string, auth []ssh.AuthMethod) error {
 		},
 	}
 
-	clients := NewSSHClient(host, *clientConfig)
+	clients := NewSSHClientWithConfig(host, *clientConfig)
 	clients.Stdout = os.Stdout
 	clients.Stderr = os.Stderr
 	clients.Stdin = os.Stdin
 
-	ctx, cancel := context.WithCancel(context.Background())
-	clients.Connect(ctx, peerinfo.ID)
-	defer cancel()
+	clients.Connect(peerinfo.ID)
 	return nil
 }
 func parsePrivateKey(keyPath string) (private []byte, _ error) {

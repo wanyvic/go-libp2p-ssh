@@ -31,12 +31,8 @@ func server() error {
 	if err != nil {
 		return err
 	}
-	config, err := DefaultServerConfig()
-	if err != nil {
-		return err
-	}
 
-	NewSSHService(host, config)
+	NewSSHService(host)
 	fmt.Printf("Your PeerID is :%s\nListen:%s\n", host.ID().String(), host.Addrs())
 
 	select {}

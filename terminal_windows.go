@@ -1,7 +1,6 @@
 package ssh
 
 import (
-	"io"
 	"os"
 	"syscall"
 
@@ -22,6 +21,8 @@ func init() {
 		logrus.Error(err)
 	}
 }
+
+//getTerminalSize get terminal size
 func getTerminalSize() (int, int, error) {
 	if h, err := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE); err != nil {
 		logrus.Error(err)
@@ -37,6 +38,8 @@ func getTerminalSize() (int, int, error) {
 		return int(width), int(height), nil
 	}
 }
+
+//setTerminalEcho cancel terminal echo
 func setTerminalEcho(flag bool) {
 	h := syscall.Handle(os.Stdin.Fd())
 	if flag {
@@ -48,7 +51,4 @@ func setTerminalEcho(flag bool) {
 			logrus.Error(err)
 		}
 	}
-}
-func PrintMOTD(w io.Writer) {
-
 }

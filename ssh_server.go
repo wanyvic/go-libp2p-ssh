@@ -24,10 +24,12 @@ var log = logging.Logger("ssh")
 const ID = "/ssh/1.0.0"
 
 type SSHService struct {
-	Host         host.Host
 	ServerConfig ssh.ServerConfig
 }
 
+//DefaultServerConfig use
+//privateDirectory $HOME/.ssh/
+//checkPasswd from /etc/shadow
 func DefaultServerConfig() (config ssh.ServerConfig, err error) {
 	var home string
 	if home = os.Getenv("HOME"); home == "" {
@@ -36,7 +38,7 @@ func DefaultServerConfig() (config ssh.ServerConfig, err error) {
 	config = ssh.ServerConfig{
 		//Define a function to run when a client attempts a password login
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			if err := CheckPasswd(c.User(), pass); err != nil {
+			if err := checkPasswd(c.User(), pass); err != nil {
 				// Should use constant-time compare (or better, salt+hash) in a production setting.
 				return nil, err
 			}
@@ -71,25 +73,39 @@ func DefaultServerConfig() (config ssh.ServerConfig, err error) {
 		// sessions may not be a wise idea
 		// NoClientAuth: true,
 	}
-	config, err = AddHostKey(&config, home+"/.ssh/id_rsa")
+	privateBytes, err := ioutil.ReadFile(home + "/.ssh/id_rsa")
+	if err != nil {
+		log.Fatal("Failed to load private key ", err)
+		return config, err
+	}
+	config, err = AddHostKey(&config, privateBytes)
 	if err != nil {
 		return config, err
 	}
 	return config, nil
 }
-func NewSSHService(h host.Host, config ssh.ServerConfig) *SSHService {
-	ss := &SSHService{h, config}
-	h.SetStreamHandler(ID, ss.SSHandler)
+
+//NewSSHService Create a Default ssh service
+func NewSSHService(h host.Host) (*SSHService, error) {
+	config, err := DefaultServerConfig()
+	if err != nil {
+		return nil, err
+	}
+	ss := &SSHService{config}
+	h.SetStreamHandler(ID, ss.handler)
+	return ss, nil
+}
+
+//NewSSHServiceWithConfig Create a ssh service with server config
+func NewSSHServiceWithConfig(h host.Host, config ssh.ServerConfig) *SSHService {
+	ss := &SSHService{config}
+	h.SetStreamHandler(ID, ss.handler)
 	return ss
 }
 
-func AddHostKey(config *ssh.ServerConfig, keyPath string) (ssh.ServerConfig, error) {
+//AddHostKey add ssh private key to Host(.ssh/id_rsa)
+func AddHostKey(config *ssh.ServerConfig, privateBytes []byte) (ssh.ServerConfig, error) {
 	// You can generate a keypair with 'ssh-keygen -t rsa'
-	privateBytes, err := ioutil.ReadFile(keyPath)
-	if err != nil {
-		log.Fatal("Failed to load private key ", err)
-		return *config, err
-	}
 	private, err := ssh.ParsePrivateKey(privateBytes)
 	if err != nil {
 		log.Fatal("Failed to parse private key")
@@ -98,7 +114,8 @@ func AddHostKey(config *ssh.ServerConfig, keyPath string) (ssh.ServerConfig, err
 	config.AddHostKey(private)
 	return *config, nil
 }
-func (ss *SSHService) SSHandler(s network.Stream) {
+
+func (ss *SSHService) handler(s network.Stream) {
 	sshConn, chans, reqs, err := ssh.NewServerConn(s, &ss.ServerConfig)
 	if err != nil {
 		log.Error("Failed to handshake ", err)

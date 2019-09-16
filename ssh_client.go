@@ -13,19 +13,24 @@ import (
 )
 
 type SSHClient struct {
-	Host         host.Host
+	host         host.Host
 	ClientConfig ssh.ClientConfig
 	Stdout       io.Writer
 	Stderr       io.Writer
 	Stdin        io.Reader
 }
 
-func NewSSHClient(h host.Host, config ssh.ClientConfig) *SSHClient {
+//NewSSHClientWithConfig Create a new ssh client with config
+func NewSSHClientWithConfig(h host.Host, config ssh.ClientConfig) *SSHClient {
 	sc := &SSHClient{h, config, nil, nil, nil}
 	return sc
 }
-func (sc *SSHClient) Connect(ctx context.Context, p peer.ID) error {
-	stream, err := sc.Host.NewStream(ctx, p, ID)
+
+//Connect connect to ssh server
+func (sc *SSHClient) Connect(p peer.ID) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, err := sc.host.NewStream(ctx, p, ID)
 	if err != nil {
 		return err
 	}
@@ -54,7 +59,7 @@ func (sc *SSHClient) Connect(ctx context.Context, p peer.ID) error {
 	// Notify os.Interrupt
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
-	go func() {
+	go func(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
@@ -64,7 +69,7 @@ func (sc *SSHClient) Connect(ctx context.Context, p peer.ID) error {
 				w.Write([]byte{3})
 			}
 		}
-	}()
+	}(ctx)
 	// Set up terminal width, height
 	width, height, err := getTerminalSize()
 	if err != nil {
@@ -96,6 +101,8 @@ func (sc *SSHClient) Connect(ctx context.Context, p peer.ID) error {
 	session.Wait()
 	return nil
 }
+
+// windowChange change window size when the terminal resize
 func windowChange(ctx context.Context, session *ssh.Session) {
 	width, height, err := getTerminalSize()
 	if err != nil {

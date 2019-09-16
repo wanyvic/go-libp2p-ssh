@@ -38,7 +38,7 @@ func DefaultServerConfig() (config ssh.ServerConfig, err error) {
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 			if err := CheckPasswd(c.User(), pass); err != nil {
 				// Should use constant-time compare (or better, salt+hash) in a production setting.
-				return nil, errors.New("Mismatch password")
+				return nil, err
 			}
 			return nil, nil
 		},

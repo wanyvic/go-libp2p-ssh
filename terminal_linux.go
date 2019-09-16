@@ -52,7 +52,7 @@ func CheckPasswd(user string, passwd []byte) error {
 	var soltHash string
 	shadow, err := ioutil.ReadFile("/etc/shadow")
 	if err != nil {
-		return errors.New("Read /etc/shadow failed")
+		return err
 	}
 	lines := strings.Split(string(shadow), "\n")
 	for _, line := range lines {

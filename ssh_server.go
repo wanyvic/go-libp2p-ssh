@@ -197,13 +197,13 @@ func handleChannel(newChannel ssh.NewChannel, user string) {
 			case "pty-req":
 				termLen := req.Payload[3]
 				w, h := parseDims(req.Payload[termLen+4:])
-				SetWinsize(bashf.Fd(), w, h)
+				setWinsize(bashf.Fd(), w, h)
 				// Responding true (OK) here will let the client
 				// know we have a pty ready for input
 				req.Reply(true, nil)
 			case "window-change":
 				w, h := parseDims(req.Payload)
-				SetWinsize(bashf.Fd(), w, h)
+				setWinsize(bashf.Fd(), w, h)
 			}
 		}
 	}()
@@ -224,8 +224,8 @@ type Winsize struct {
 	y      uint16 // unused
 }
 
-// SetWinsize sets the size of the given pty.
-func SetWinsize(fd uintptr, w, h uint32) {
+// setWinsize sets the size of the given pty.
+func setWinsize(fd uintptr, w, h uint32) {
 	ws := &Winsize{Width: uint16(w), Height: uint16(h)}
 	syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(syscall.TIOCSWINSZ), uintptr(unsafe.Pointer(ws)))
 }

@@ -103,3 +103,4 @@ func main() {
     clients.Connect(peerinfo.ID)
 }
 ```
+more [GoDoc](https://godoc.org/github.com/wanyvic/go-libp2p-ssh#SetWinsize)
